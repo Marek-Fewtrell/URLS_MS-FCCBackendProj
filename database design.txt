@@ -1,0 +1,12 @@
+
+Database Design
+
+Database:
+urlData
+
+collection:
+url
+
+Names:
+shortened_Id
+original_Url

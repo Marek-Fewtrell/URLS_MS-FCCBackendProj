@@ -45,6 +45,7 @@ app.route('/')
 //Handles shortened URL access.
 app.route('/:input')
     .get(function(req, res) {
+      console.log("Directing to site");
       //check for valid shortcut url.
       //if valid, redirect to it.
       MongoClient.connect(url, function(err, db) {
@@ -52,17 +53,26 @@ app.route('/:input')
           console.log('Unable to connect to the mongoDB server. Error: '. err);
         } else {
           console.log("Connection establsihed to database.");
-          console.log(req.params.input);
+          //console.log(req.params.input);
           var query = {"shortened_Id": req.params.input};
           db.collection("url").find(query).toArray(function(err, result) {
             if (err) throw err;
             if (result.length != 1) {
-              console.log(result);
+              //console.log(result);
               console.log("Doesn't exist.");
             } else {
               console.log("Existing URL found. Redirecting now.");
               //console.log(result);
-              res.redirect(result[0].original_Url);
+              //Urls need a http:// at the start.
+              //Otherwise, will only try to redirect on the same site currently on.
+              var regex = /(https?:\/\/)/;
+              if (regex.test(result[0].original_Url)) {
+                res.redirect(result[0].original_Url);
+              } else {
+                var tempHolder = "http://" + result[0].original_Url
+                res.redirect(tempHolder);
+              }
+
               //res.type("text").send("Existing Found, " + result[0].original_Url);
             }
             db.close();
@@ -122,7 +132,6 @@ app.route('/new/*')
   app.route('/new/*')
       .get(function(req, res) {
         var tempReturnObj = {"original_url": req.params[0]};
-        //res.send();
         //If valid URL.
         if (checkValidURL(req.params[0])) {
           //return short url.
@@ -132,7 +141,7 @@ app.route('/new/*')
             } else {
               console.log("Connection establsihed to database.");
 
-              handleOperationsAsync(req.params[0], tempReturnObj, db ).then(function(data) {
+              handleShortener(req.params[0], tempReturnObj, db ).then(function(data) {
                 console.log("closed connection");
                 db.close();
                 res.send(tempReturnObj);
@@ -151,7 +160,7 @@ app.route('/new/*')
 /*
   Handles the checking for an existing item. If it doesn't exists, creates one. else shows the current one.
 */
-function handleOperationsAsync(validURL, tempReturnObj, db) {
+function handleShortener(validURL, tempReturnObj, db) {
   return new Promise(function(resolve, reject) {
 
     var query = {original_Url: validURL};
@@ -159,14 +168,18 @@ function handleOperationsAsync(validURL, tempReturnObj, db) {
       if (err) throw err;
       //console.log(result.length);
       if (result.length != 1) {
-        var shortenedUrlId = "1";
-        var newObj = {'shortened_Id': shortenedUrlId, 'original_Url': validURL};
-        console.log("Create new.");
-        handleOperationsAsync2(db, newObj).then(function(data) {
-          tempReturnObj['shortened_url'] = shortenedUrlId;
-          resolve(tempReturnObj);
-        });
+        handleUniqueURL(db).then(function(data){
+          var shortenedUrlId = (data+1).toString();
+          console.log("ShortenedUrlId:", shortenedUrlId);
+          var newObj = {'shortened_Id': shortenedUrlId, 'original_Url': validURL};
+          console.log("Create new.");
+          handleInsertRecord(db, newObj).then(function(data) {
+            tempReturnObj['shortened_url'] = shortenedUrlId;
+            resolve(tempReturnObj);
+          });
+        }, function(err) {
 
+        });
       } else {
         tempReturnObj['shortened_url'] = result[0]['shortened_Id'];
         console.log("Existing URL found.");
@@ -178,10 +191,22 @@ function handleOperationsAsync(validURL, tempReturnObj, db) {
   });
 }
 
+function handleUniqueURL(db) {
+  return new Promise(function(resolve, reject) {
+    //Assuming no orphaned documents or chunk migration in process.
+    //Alternatively could use db.collection.aggregate() to $sum documents..
+    db.collection("url").count().then(function(data){
+      resolve(data);
+    }, function(err){
+      throw err;
+    })
+  });
+}
+
 /*
   Handles the creatation of a new item.
 */
-function handleOperationsAsync2(db, newObj) {
+function handleInsertRecord(db, newObj) {
   return new Promise(function(resolve, reject) {
 
     db.collection("url").insertOne(newObj, function(err, res) {
@@ -191,6 +216,18 @@ function handleOperationsAsync2(db, newObj) {
     });
 
   });
+}
+
+/*
+  Checks for a valid URL.
+*/
+function checkValidURL(url) {
+  var regexUrl = /(https?:\/\/)?(www\.)?([a-zA-Z]+)(\.[a-zA-Z]{2,})+(\:\d{2,})?/;
+  if (regexUrl.test(url)) {
+    return true;
+  } else {
+    return false;
+  }
 }
 
 
